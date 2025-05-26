@@ -5,9 +5,9 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { Mail, Phone, Github, Linkedin, Clipboard } from "lucide-react";
-import { contactFormSchema } from "@/lib/schemas/contactSchemas";
+import { contactFormSchema } from "@/lib/schemas/contact";
 import emailjs from "emailjs-com";
-import { fetchSocials } from "@/utils/supabaseActions";
+import { fetchSocials } from "@/actions/socials";
 
 type ContactFormInputs = z.infer<typeof contactFormSchema>;
 

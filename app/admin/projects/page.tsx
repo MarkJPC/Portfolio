@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
-import { fetchProjects } from "@/utils/supabaseActions";
+import { fetchProjects } from "@/actions/project";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<any[]>([]);

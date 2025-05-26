@@ -2,11 +2,11 @@
 
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { userSettingsSchema } from "@/lib/schemas/settingsSchemas";
-import { UserSettings } from "@/lib/types/settingTypes";
+import { userSettingsSchema } from "@/lib/schemas/settings";
+import { UserSettings } from "@/lib/types/settings";
 import { useState, useEffect } from "react";
-import { fetchSettings } from "@/utils/supabaseActions";
-import { submitSettings } from "@/utils/supabaseActions";
+import { fetchSettings } from "@/actions/settings";
+import { submitSettings } from "@/actions/settings";
 
 export default function SettingsForm() {
   const [loading, setLoading] = useState(false);

@@ -1,0 +1,5 @@
+export type ProjectCategories = {
+    id: string; // UUID or unique identifier
+    name: string; // Name of the project category
+    created_at: Date; // Timestamp when the category was created
+}

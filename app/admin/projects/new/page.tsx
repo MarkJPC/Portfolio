@@ -2,7 +2,6 @@
 
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { createProjectSchema, CreateProjectInput, createDevlogEntrySchema } from "@/lib/schemas/schema";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { createClient } from "@/utils/supabase/client";
@@ -13,66 +12,66 @@ import ReactMarkdown from "react-markdown";
 import { v4 as uuidv4 } from 'uuid';
 import Image from "next/image";
 import { Skill, ProjectCategory } from "@/lib/schemas/schema";
-import { fetchSkills, fetchProjectCategories } from "@/utils/supabaseActions";
+import { fetchProjectCategories } from "@/utils/supabaseActions";
+import { fetchSkills } from "@/actions/skills";
+import { ProjectFormData, projectFormSchema, createProjectSchema, CreateProjectData } from "@/lib/schemas/project";
+import { createProject } from "@/actions/project";
+import { DevlogEntry } from "@/lib/types/devlogEntries";
+import { GalleryImage } from "@/lib/types/galleryImages";
+import { set } from "zod";
 
 // Dynamically import the Markdown editor
 const MarkdownEditor = dynamic(() => import("react-markdown-editor-lite"), { ssr: false });
 
-// Define types for gallery images and devlogs
-interface GalleryImage {
-  id: string;
-  file: File;
-  caption: string;
-  alt_text: string;
-  display_order: number;
-  preview?: string;
-}
-
-interface DevlogEntry {
-  id: string;
-  title: string;
-  content: string;
-  entry_date: string;
-  milestone_type: 'major' | 'minor' | null;
-}
-
 export default function ProjectForm() {
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // state for project description
   const [description, setDescription] = useState(""); // State for Markdown content
   
-  // States for gallery and devlogs
+  // States for gallery images
   const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
+
+  // State for devlog entries
   const [devlogEntries, setDevlogEntries] = useState<DevlogEntry[]>([]);
   const [currentDevlog, setCurrentDevlog] = useState<DevlogEntry>({
-    id: uuidv4(),
+    id: "",
     title: "",
     content: "",
-    entry_date: new Date().toISOString().split("T")[0],
-    milestone_type: null
+    entry_date: new Date(),
+    milestone_type: undefined,
   });
   const [devlogContent, setDevlogContent] = useState("");
+
+  // state for skills
   const [allSkills, setAllSkills] = useState<Skill[]>([]);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
+  const [newSkill, setNewSkill] = useState("");
+
+
+  // state for project categories
   const [allCategories, setAllCategories] = useState<ProjectCategory[]>([]);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
-  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [newCategory, setNewCategory] = useState("");
-  const [newSkill, setNewSkill] = useState("");
 
   const {
     register,
     handleSubmit,
     formState: { errors },
     setValue,
-  } = useForm<CreateProjectInput>({
-    resolver: zodResolver(createProjectSchema),
+    watch,
+  } = useForm<ProjectFormData>({
+    resolver: zodResolver(projectFormSchema),
     defaultValues: {
       title: "",
       summary: "",
       description: "",
-      start_date: new Date().toISOString().split("T")[0],
+      start_date: new Date(),
+      end_date: null,
+      repository_url: null,
+      demo_url: null,
       status: "in_progress",
       featured: false,
       category_ids: [],
@@ -87,12 +86,17 @@ export default function ProjectForm() {
     const files = Array.from(e.target.files);
     const newImages: GalleryImage[] = files.map((file, index) => {
       return {
-        id: uuidv4(),
+        id: '',
+        project_id: '',
+        image_url: URL.createObjectURL(file),
+        storage_path: '', // This will be set after upload
         file,
         caption: "",
         alt_text: file.name.split('.')[0], // Use filename as default alt text
         display_order: galleryImages.length + index,
-        preview: URL.createObjectURL(file)
+        preview: URL.createObjectURL(file),
+        created_at: new Date(),
+        updated_at: new Date(),
       };
     });
     
@@ -129,11 +133,11 @@ export default function ProjectForm() {
     
     // Reset for the next entry
     setCurrentDevlog({
-      id: uuidv4(),
+      id: '',
       title: "",
       content: "",
-      entry_date: new Date().toISOString().split("T")[0],
-      milestone_type: null
+      entry_date: new Date(),
+      milestone_type: undefined,
     });
     setDevlogContent("");
   };
@@ -144,148 +148,37 @@ export default function ProjectForm() {
   };
 
   // Handle form submission
-    const onSubmit = async (data: CreateProjectInput) => {
-        setLoading(true);
-        setError(null);
+    const onSubmit = async (data: ProjectFormData) => {
 
-        console.log("Form data before submission:", data);
-    
-        try {
-        // Get the current user
-        const { data: userData, error: userError } = await supabase.auth.getUser();
-    
-        if (userError) {
-            console.error("Authentication error:", userError);
-            throw new Error(`Authentication failed: ${userError.message}`);
+      setLoading(true);
+      setError(null);
+
+      const completedData: CreateProjectData = {
+        ...data,
+        gallery_images: galleryImages.map(img => ({
+          file: img.file,
+          caption: img.caption || null,
+          alt_text: img.alt_text,
+          display_order: img.display_order
+        })),
+        devlog_entries: devlogEntries,
+      };
+
+      console.log("Form data to be submitted:", completedData);
+
+      createProject(completedData).then((response) => {
+        console.log("Project creation response:", response);
+
+        if (response) {
+          setLoading(false);
+          console.log("Project created successfully:", response);
+          router.push("/admin/projects");
+        } else {
+          setLoading(false);
+          setError("Failed to create project. Please try again.");
         }
-        
-        if (!userData.user) {
-            console.error("No user found");
-            throw new Error("Not authenticated - please log in again");
-        }
-    
-        console.log("User data:", userData.user);
-    
-        // STEP 1: Create the project
-        try {
-            const formattedData = {
-            ...data,
-            end_date: data.end_date === "" ? null : data.end_date,
-            user_id: userData.user.id,
-            };
-            console.log("Creating project with data:", formattedData);
-    
-            const { data: projectData, error: projectError } = await supabase
-            .from("projects")
-            .insert(formattedData)
-            .select('id')
-            .single();
-    
-            if (projectError) {
-                console.error("Project creation error:", projectError);
-                throw new Error(`Project creation failed: ${projectError.message}`);
-            }
-    
-            const projectId = projectData.id;
-            console.log("Project created successfully with ID:", projectId);
-    
-            // STEP 2: Process gallery images
-            if (galleryImages.length > 0) {
-            try {
-                console.log(`Processing ${galleryImages.length} gallery images`);
-                const projectBucketPath = `projects/${projectId}`;
-                
-                for (const image of galleryImages) {
-                    try {
-                        const fileExt = image.file.name.split('.').pop();
-                        const filePath = `${projectBucketPath}/${uuidv4()}.${fileExt}`;
-                        
-                        // Upload to storage
-                        const { error: uploadError } = await supabase.storage
-                            .from('images')
-                            .upload(filePath, image.file);
-                        
-                        if (uploadError) {
-                            console.error(`Image upload error for ${image.file.name}:`, uploadError);
-                            throw new Error(`Image upload failed: ${uploadError.message}`);
-                        }
-                        
-                        // Get public URL for the image
-                        const { data: publicUrlData } = supabase.storage
-                            .from('images')
-                            .getPublicUrl(filePath);
-                        
-                        // Create gallery image record
-                        const galleryData = {
-                            project_id: projectId,
-                            image_url: publicUrlData.publicUrl,
-                            storage_path: filePath,
-                            caption: image.caption,
-                            alt_text: image.alt_text,
-                            display_order: image.display_order
-                        };
-                        
-                        console.log("Creating gallery image record:", galleryData);
-                        const { error: galleryError } = await supabase
-                            .from('gallery_images')
-                            .insert(galleryData);
-                        
-                        if (galleryError) {
-                            console.error("Gallery record creation error:", galleryError);
-                            throw new Error(`Gallery record creation failed: ${galleryError.message}`);
-                        }
-                    } catch (imageError: any) {
-                        console.error(`Failed processing image ${image.file.name}:`, imageError);
-                        throw new Error(`Image processing failed: ${imageError.message}`);
-                    }
-                }
-                console.log("All gallery images processed successfully");
-            } catch (galleryError: any) {
-                console.error("Gallery processing error:", galleryError);
-                throw new Error(`Gallery processing failed: ${galleryError.message}`);
-            }
-            }
-            
-            // STEP 3: Process devlog entries
-            if (devlogEntries.length > 0) {
-            try {
-                console.log(`Processing ${devlogEntries.length} devlog entries`);
-                const devlogsToInsert = devlogEntries.map(entry => ({
-                project_id: projectId,
-                title: entry.title,
-                content: entry.content,
-                entry_date: entry.entry_date,
-                milestone_type: entry.milestone_type
-                }));
-                
-                console.log("Creating devlog entries:", devlogsToInsert);
-                const { error: devlogError } = await supabase
-                .from('devlog_entries')
-                .insert(devlogsToInsert);
-                
-                if (devlogError) {
-                console.error("Devlog creation error:", devlogError);
-                throw new Error(`Devlog creation failed: ${devlogError.message}`);
-                }
-                console.log("All devlog entries processed successfully");
-            } catch (devlogError: any) {
-                console.error("Devlog processing error:", devlogError);
-                throw new Error(`Devlog processing failed: ${devlogError.message}`);
-            }
-            }
-    
-            console.log("Project creation completed successfully");
-            router.push("/admin/projects");
-            router.refresh();
-        } catch (projectError: any) {
-            throw projectError; // Re-throw to be caught by outer catch
-        }
-        } catch (err: any) {
-        console.error("Error in form submission:", err);
-        setError(err.message || "An error occurred");
-        } finally {
-        setLoading(false);
-        }
+      });
+
     };
 
   useEffect(() => {
@@ -294,6 +187,7 @@ export default function ProjectForm() {
     }
   }, [description, setValue]);
 
+  // fetch existing skills and categories
   useEffect(() => {
     fetchSkills().then((data) => {
       if (data) {
@@ -470,9 +364,9 @@ export default function ProjectForm() {
                   <div className="flex items-start gap-4">
                     {/* Image preview */}
                     <div className="w-24 h-24 relative">
-                      {image.preview && (
+                      {image.image_url && (
                         <Image
-                          src={image.preview}
+                          src={image.image_url}
                           alt="Preview"
                           fill
                           style={{ objectFit: 'cover' }}
@@ -577,8 +471,10 @@ export default function ProjectForm() {
                 <input
                   id="devlog-date"
                   type="date"
-                  value={currentDevlog.entry_date}
-                  onChange={(e) => setCurrentDevlog({...currentDevlog, entry_date: e.target.value})}
+                  value={currentDevlog.entry_date instanceof Date ? 
+                    currentDevlog.entry_date.toISOString().split('T')[0] : 
+                    String(currentDevlog.entry_date)}
+                  onChange={(e) => setCurrentDevlog({...currentDevlog, entry_date: e.target.value ? new Date(e.target.value) : new Date()})}
                   className="border p-2 w-full rounded focus:ring-2 focus:ring-primary focus:outline-none"
                 />
               </div>
@@ -590,7 +486,7 @@ export default function ProjectForm() {
                   value={currentDevlog.milestone_type || ''}
                   onChange={(e) => setCurrentDevlog({
                     ...currentDevlog, 
-                    milestone_type: e.target.value === '' ? null : e.target.value as 'major' | 'minor'
+                    milestone_type: e.target.value === '' ? undefined : e.target.value as 'major' | 'minor'
                   })}
                   className="border p-2 w-full rounded focus:ring-2 focus:ring-primary focus:outline-none"
                 >
@@ -644,7 +540,7 @@ export default function ProjectForm() {
                       <div>
                         <span className="font-medium">{entry.title}</span>
                         <span className="ml-2 text-sm text-muted-foreground">
-                          {entry.entry_date}
+                          {entry.entry_date instanceof Date ? entry.entry_date.toISOString().split('T')[0] : entry.entry_date}
                           {entry.milestone_type && (
                             <span className={`ml-2 px-1.5 py-0.5 rounded text-xs ${
                               entry.milestone_type === 'major' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'
@@ -690,7 +586,7 @@ export default function ProjectForm() {
                   </label>
                 ))}
               </div>
-              {/* Optionally, add an input to create a new category */}
+              {/* Optionally, add an input to create a new category 
               <input
                 type="text"
                 placeholder="Add new category"
@@ -703,6 +599,7 @@ export default function ProjectForm() {
                 }}
                 className="border p-1 rounded mt-2"
               />
+              */}
           </div>
 
           {/* Project Skills */}
@@ -727,7 +624,7 @@ export default function ProjectForm() {
                 </label>
               ))}
             </div>
-            {/* Optionally, add an input to create a new skill */}
+            {/* Optionally, add an input to create a new skill 
             <input
               type="text"
               placeholder="Add new skill"
@@ -740,6 +637,7 @@ export default function ProjectForm() {
               }}
               className="border p-1 rounded mt-2"
             />
+            */}
           </div> 
         </div>
       </div>

@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Terminal, { ColorMode, TerminalOutput } from 'react-terminal-ui';
-import { fetchAboutMe } from '@/utils/supabaseActions';
+import { fetchAboutMe } from '@/actions/about';
 
 
 export default function About() {
